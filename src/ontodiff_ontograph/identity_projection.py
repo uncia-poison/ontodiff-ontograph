@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from math import isfinite
 from typing import Any, Mapping
 
 SOURCE_SCHEMA = "ontodiff.identity-dependency.v1"
 RELATION_SYMBOLS = {
-    "hard": "⊢",
+    "hard": "⇒",
     "supporting": "⊢",
     "contextual": "≈",
     "identity": "↺",
@@ -22,9 +23,15 @@ def _required_string(value: Any, field: str) -> str:
     return value
 
 
+def _score(value: Any, field: str) -> float:
+    if type(value) not in (int, float) or not 0 <= value <= 1 or not isfinite(value):
+        raise IdentityGraphProjectionError(f"{field} must be a finite number between 0 and 1")
+    return float(value)
+
+
 def project_identity_graph(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Create a deterministic read-only support map from an identity graph."""
-    if payload.get("schema_version") != SOURCE_SCHEMA:
+    if not isinstance(payload, Mapping) or payload.get("schema_version") != SOURCE_SCHEMA:
         raise IdentityGraphProjectionError("unsupported identity dependency schema")
     raw_nodes = payload.get("nodes", [])
     raw_edges = payload.get("edges", [])
@@ -42,7 +49,7 @@ def project_identity_graph(payload: Mapping[str, Any]) -> dict[str, Any]:
             "node_id": node_id,
             "kind": _required_string(raw.get("kind"), "kind"),
             "status": _required_string(raw.get("status", "active"), "status"),
-            "confidence": float(raw.get("confidence", 1.0)),
+            "confidence": _score(raw.get("confidence", 1.0), "confidence"),
             "label": str(raw.get("label", "")),
             "metadata": deepcopy(dict(raw.get("metadata", {}))),
             "incoming": [],
@@ -50,7 +57,7 @@ def project_identity_graph(payload: Mapping[str, Any]) -> dict[str, Any]:
         }
 
     edges: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, float, str | None]] = set()
     for raw in raw_edges:
         if not isinstance(raw, Mapping):
             raise IdentityGraphProjectionError("edge must be a mapping")
@@ -61,7 +68,13 @@ def project_identity_graph(payload: Mapping[str, Any]) -> dict[str, Any]:
             raise IdentityGraphProjectionError("edge references an unknown node")
         if kind not in RELATION_SYMBOLS:
             raise IdentityGraphProjectionError(f"unsupported edge kind: {kind}")
-        key = (source, target, kind)
+        if source == target:
+            raise IdentityGraphProjectionError("self dependency is not allowed")
+        weight = _score(raw.get("weight", 1.0), "weight")
+        context = raw.get("context")
+        if context is not None and type(context) is not str:
+            raise IdentityGraphProjectionError("edge context must be a string or null")
+        key = (source, target, kind, weight, context)
         if key in seen:
             continue
         seen.add(key)
@@ -70,18 +83,26 @@ def project_identity_graph(payload: Mapping[str, Any]) -> dict[str, Any]:
             "target_id": target,
             "kind": kind,
             "symbol": RELATION_SYMBOLS[kind],
-            "weight": float(raw.get("weight", 1.0)),
-            "context": raw.get("context"),
+            "weight": weight,
+            "context": context,
         }
         edges.append(edge)
         nodes[source]["outgoing"].append(target)
         nodes[target]["incoming"].append(source)
 
+    for node in nodes.values():
+        for field in ("incoming", "outgoing"):
+            node[field] = sorted(set(node[field]))
+
     return {
         "schema_version": "ontodiff.ontograph.identity-projection.v1",
         "source_schema": SOURCE_SCHEMA,
         "nodes": [nodes[key] for key in sorted(nodes)],
-        "edges": sorted(edges, key=lambda e: (e["source_id"], e["target_id"], e["kind"])),
+        "edges": sorted(
+            edges,
+            key=lambda e: (e["source_id"], e["target_id"], e["kind"], e["weight"],
+                           e["context"] is not None, e["context"] or ""),
+        ),
         "identity_nodes": sorted(
             node_id for node_id, node in nodes.items() if node["kind"] == "self_state"
         ),

@@ -2,23 +2,17 @@
 
 This repository extends [`ontodiff`](https://github.com/uncia-poison/ontodiff) with an automated packaging layer that turns self-gathered knowledge into symbolic ontographs.
 
-It includes:
+Install with `python -m pip install -e .`. Export the graph from `ontodiff` using
+`IdentityDependencyGraph.to_dict()`, then inspect it with the installed package:
 
-- **Symbol allocator**: picks stable Unicode symbols (with a small emoji fallback) for each concept type and persists assignments in `data/symbols.json`.
-- **Ontology graph builder**: mines self-memory rules, de-duplicates candidate nodes, builds a directed ontograph, and weights edges based on conditional probabilities.
-- **KaiScriptor exporter**: dumps the graph as a KaiScriptor code block and a human-readable Markdown proposal in `proposals/`.
+```python
+import json
+from pathlib import Path
+from ontodiff_ontograph import project_identity_graph, render_identity_markdown
 
-The first layer (self-write gate & memory) lives in the [`ontodiff`](https://github.com/uncia-poison/ontodiff) repository.
-
-## Quickstart
-
-```bash
-pip install -e .
-python -m ontodiff.cli examples/sample_chat.jsonl --root .
-python -c "import ontodiff.ontograph.migrate_emoji as m; m.migrate_json_events('.')"
-python -c "import ontodiff.ontograph.packager as p; print(p.run('.'))"
+graph = json.loads(Path("identity-graph.json").read_text(encoding="utf-8"))
+print(render_identity_markdown(project_identity_graph(graph)))
 ```
-
 
 ## Identity support projection
 
@@ -31,7 +25,8 @@ repository is an inspection and packaging layer.
 
 Identity dependency relations use compact symbols:
 
-- supporting/hard dependency: ⊢
+- supporting evidence: ⊢
+- strict dependency (read source to target): ⇒
 - contextual relation: ≈
 - identity reconsolidation dependency: ↺
 

@@ -38,3 +38,12 @@ def test_markdown_is_read_only_inspection_report():
     assert "Read-only projection" in text
     assert "s1" in text
     assert "reconsolidate" in text
+
+def test_projection_keeps_distinct_edges_and_is_order_independent():
+    payload = fixture()
+    payload["edges"].append(dict(payload["edges"][0], context="alternate support"))
+    first = project_identity_graph(payload)
+    payload["edges"].reverse()
+    payload["nodes"].reverse()
+    assert project_identity_graph(payload) == first
+    assert len(first["edges"]) == 3
